@@ -3,7 +3,4 @@
   <ItemGroup>
     <ClCompile Include="PedFuncs.cpp" />
   </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="PedFuncs.h" />
-  </ItemGroup>
 </Project>

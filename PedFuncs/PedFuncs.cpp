@@ -10,85 +10,102 @@
 #include "CCutsceneMgr.h"
 #include "CTimer.h"
 #include <time.h>
-
-#include "PedFuncs.h"
+#include "IniReader\IniReader.h"
 
 using namespace plugin;
 using namespace std;
 
-class PedExtended {
+const int TEXTURE_LIMIT = 8;
+
+void FindRemaps(CPed* ped);
+
+class PedExtended
+{
 public:
-	int curRemapNum[4];
-	int TotalRemapNum[4];
-	RwTexture * originalRemap[4];
-	std::list<RwTexture*> remaps[4];
+	int curRemapNum[TEXTURE_LIMIT];
+	int TotalRemapNum[TEXTURE_LIMIT];
+	RwTexture * originalRemap[TEXTURE_LIMIT];
+	std::list<RwTexture*> remaps[TEXTURE_LIMIT];
 
-	PedExtended(CPed *ped) {
-		originalRemap[0] = nullptr;
-		originalRemap[1] = nullptr;
-		originalRemap[2] = nullptr;
-		originalRemap[3] = nullptr;
-
-		curRemapNum[0] = -1;
-		curRemapNum[1] = -1;
-		curRemapNum[2] = -1;
-		curRemapNum[3] = -1;
-
-		TotalRemapNum[0] = 0;
-		TotalRemapNum[1] = 0;
-		TotalRemapNum[2] = 0;
-		TotalRemapNum[3] = 0;
+	PedExtended(CPed *ped)
+	{
+		for (int i = 0; i < TEXTURE_LIMIT; ++i)
+		{
+			originalRemap[i] = nullptr;
+			curRemapNum[i] = -1;
+			TotalRemapNum[i] = 0;
+		}
 	}
 };
 
 PedExtendedData<PedExtended> extData;
 
-class DontRepeatIt {
+class DontRepeatIt
+{
 public:
 	int modelId;
-	int lastNum[4];
+	int lastNum[TEXTURE_LIMIT];
 
-	DontRepeatIt() {
+	DontRepeatIt()
+	{
 		modelId = -1;
-		lastNum[0] = -1;
-		lastNum[1] = -1;
-		lastNum[2] = -1;
-		lastNum[3] = -1;
+		for (int i = 0; i < TEXTURE_LIMIT; ++i)
+		{
+			lastNum[i] = -1;
+		}
 	}
 };
 
-
-fstream fs;
+fstream lg;
+bool useLog = false;
 const int totalOfDontRepeatIt = 30;
 unsigned int cutsceneRunLastTime = 0;
 
 DontRepeatIt *dontRepeatIt[totalOfDontRepeatIt];
 int curDontRepeatItIndex;
 
-class PedFuncs {
+class PedFuncs
+{
 public:
 
-	PedFuncs() {
+	PedFuncs()
+	{
 		srand(time(NULL));
+
+		CIniReader ini("PedFuncs.ini");
+
+		if (ini.data.size() != 0)
+		{
+			useLog = (ini.ReadInteger("Settings", "UseLog", false) == true);
+		}
 
 		static std::list<std::pair<unsigned int *, unsigned int>> resetEntries;
 
-		for (int i = 0; i < totalOfDontRepeatIt; i++) {
+		for (int i = 0; i < totalOfDontRepeatIt; ++i)
+		{
 			dontRepeatIt[i] = new DontRepeatIt;
 		}
 		curDontRepeatItIndex = 0;
 
-		fs.open("PedFuncs.log", std::fstream::out | std::fstream::trunc);
+		if (useLog)
+		{
+			lg.open("PedFuncs.log", std::fstream::out | std::fstream::trunc);
+			lg << "v0.4" << endl;
+			if (ini.data.size() == 0)
+			{
+				lg << "Warning: Can't read ini file." << endl;
+			}
+		}
 
-		fs << "v0.3.1\n";
 
-
-		Events::processScriptsEvent += [] {
+		Events::processScriptsEvent += []
+		{
 			if (CCutsceneMgr::ms_running) cutsceneRunLastTime = CTimer::m_snTimeInMilliseconds;
 		};
 		
 
-		Events::pedSetModelEvent += [](CPed *ped, int model) {
+		Events::pedSetModelEvent += [](CPed *ped, int model)
+		{
 			if ((CTimer::m_snTimeInMilliseconds - cutsceneRunLastTime) > 3000) FindRemaps(ped);
 		};
 
@@ -112,7 +129,7 @@ public:
 
 								resetEntries.push_back(std::make_pair(reinterpret_cast<unsigned int *>(&material->texture), *reinterpret_cast<unsigned int *>(&material->texture)));
 
-								for (int i = 0; i < 4; i++)
+								for (int i = 0; i < TEXTURE_LIMIT; ++i)
 								{
 									if (info->curRemapNum[i] >= 0 && info->originalRemap[i] > 0)
 									{
@@ -144,12 +161,6 @@ public:
 				*p.first = p.second;
 			resetEntries.clear();
 		};
-
-		// Flush log
-		Events::onPauseAllSounds += []
-		{
-			fs.flush();
-		};
 	}
 
 
@@ -158,7 +169,7 @@ public:
 int GetIndexFromTexture(PedExtended *info, string name, RwTexDictionary * pedTxdDic)
 {
 	int i;
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < TEXTURE_LIMIT; ++i)
 	{
 		if (info->originalRemap[i] > 0)
 		{
@@ -168,7 +179,7 @@ int GetIndexFromTexture(PedExtended *info, string name, RwTexDictionary * pedTxd
 		else
 		{
 			info->originalRemap[i] = RwTexDictionaryFindNamedTexture(pedTxdDic, &name[0]);
-			//fs << "added texture name to list: " << name << "\n";
+			//lg << "added texture name to list: " << name << endl;
 			return i;
 		}
 	}
@@ -179,7 +190,25 @@ void StoreSimpleRandom(PedExtended &info, int i)
 {
 	info.curRemapNum[i] = Random(-1, (info.TotalRemapNum[i] - 1));
 	dontRepeatIt[curDontRepeatItIndex]->lastNum[i] = info.curRemapNum[i];
-	//fs << info.curRemapNum[i] << " get in simple " << " \n";
+	//lg << info.curRemapNum[i] << " get in simple " << endl;
+}
+
+void LogRemaps(CPed *ped, PedExtended& info)
+{
+	if (useLog)
+	{
+		lg << "Model " << ped->m_nModelIndex << " total ";
+		for (int i = 0; i < TEXTURE_LIMIT; ++i)
+		{
+			lg << i << ":" << info.TotalRemapNum[i] << " ";
+		}
+		lg << "selected ";
+		for (int i = 0; i < TEXTURE_LIMIT; ++i)
+		{
+			lg << i << ":" << info.curRemapNum[i] << " ";
+		}
+		lg << endl;
+	}
 }
 
 void FindRemaps(CPed * ped)
@@ -215,36 +244,36 @@ void FindRemaps(CPed * ped)
 					if (found != std::string::npos)
 					{
 						int index = GetIndexFromTexture(&info, name.substr(0, found), pedTxdDic);
-						//fs << "found remap: " << texture->name << " index " << index << "\n";
+						//lg << "found remap: " << texture->name << " index " << index << endl;
 						if (index != -1) // hit max
 						{
 							info.remaps[index].push_back(texture);
 							info.TotalRemapNum[index]++;
-						} else fs << "WARNING: CAN'T ADD REMAP FOR TEXTURE " << texture->name << " DUE TO 4 TEXTURES LIMIT!\n";
+						} else if (useLog) lg << "WARNING: CAN'T ADD REMAP FOR TEXTURE " << texture->name << " DUE TO " << TEXTURE_LIMIT << " TEXTURES LIMIT!" << endl;
 					}
 
 					current = rwLLLinkGetNext(current);
 				}
 				if (info.TotalRemapNum[0] > 0)
 				{
-					fs << "Model " << ped->m_nModelIndex << " remaps 0:" << info.TotalRemapNum[0] << " 1:" << info.TotalRemapNum[1] << " 2:" << info.TotalRemapNum[2] << " 3:" << info.TotalRemapNum[3] << "\n";
 					int lastNum = -1;
 
 					for (int arrayIn = 0; arrayIn < totalOfDontRepeatIt; arrayIn++)
 					{
-						//fs << "array " << arrayIn << " model " << dontRepeatIt[arrayIn]->modelId << " \n";
+						//lg << "array " << arrayIn << " model " << dontRepeatIt[arrayIn]->modelId << endl;
 						if (dontRepeatIt[arrayIn]->modelId == ped->m_nModelIndex)
 						{
-							for (int i = 0; i < 4; i++)
+							for (int i = 0; i < TEXTURE_LIMIT; ++i)
 							{
 								if (info.TotalRemapNum[i] > 1)
 								{
 									lastNum = dontRepeatIt[arrayIn]->lastNum[i];
-									//fs << lastNum << " in model " << ped->m_nModelIndex << " array " << arrayIn << " \n";
-									do {
+									//lg << lastNum << " in model " << ped->m_nModelIndex << " array " << arrayIn << endl;
+									do
+									{
 										info.curRemapNum[i] = Random(-1, (info.TotalRemapNum[i] - 1));
 									} while (info.curRemapNum[i] == lastNum);
-									//fs << info.curRemapNum[i] << " get in dont repeat - index " << i << " \n";
+									//lg << info.curRemapNum[i] << " get in dont repeat - index " << i << endl;
 									dontRepeatIt[arrayIn]->lastNum[i] = info.curRemapNum[i];
 								}
 								else
@@ -252,20 +281,23 @@ void FindRemaps(CPed * ped)
 									StoreSimpleRandom(info, i);
 								}
 							}
+							LogRemaps(ped, info);
 							return;
 						}
 					}
-					//fs << "not found model " << ped->m_nModelIndex << " cur " << curDontRepeatItIndex << " \n";
+					//lg << "not found model " << ped->m_nModelIndex << " cur " << curDontRepeatItIndex << endl;
 					dontRepeatIt[curDontRepeatItIndex]->modelId = ped->m_nModelIndex;
 					curDontRepeatItIndex++;
 					if (curDontRepeatItIndex >= totalOfDontRepeatIt) curDontRepeatItIndex = 0;
-					for (int i = 0; i < 4; i++)
+					for (int i = 0; i < TEXTURE_LIMIT; ++i)
 					{
 						if (info.TotalRemapNum[i] > 0)
 						{
 							StoreSimpleRandom(info, i);
 						}
 					}
+
+					LogRemaps(ped, info);
 					return;
 				}
 			}
@@ -273,12 +305,10 @@ void FindRemaps(CPed * ped)
 	}
 }
 
-extern "C" void __declspec(dllexport) ignore() { return; };
-
 extern "C" int32_t __declspec(dllexport) Ext_GetPedRemap(CPed * ped, int index)
 {
 	PedExtended &info = extData.Get(ped);
-	fs << "Remaps: Get remap num: " << info.curRemapNum[index] << " index " << index << " for ped " << (int)ped << "\n";
+	if (useLog) lg << "Remaps: Get remap num: " << info.curRemapNum[index] << " index " << index << " for ped " << (int)ped << endl;
 	return info.curRemapNum[index];
 }
 
@@ -286,7 +316,15 @@ extern "C" void __declspec(dllexport) Ext_SetPedRemap(CPed * ped, int index, int
 {
 	PedExtended &info = extData.Get(ped);
 	info.curRemapNum[index] = num;
-	fs << "Remaps: New remap num: " << info.curRemapNum[index] << " index " << index << " for ped " << (int)ped << "\n";
+	if (useLog) lg << "Remaps: New remap num: " << info.curRemapNum[index] << " index " << index << " for ped " << (int)ped << endl;
 }
 
-extern "C" void __declspec(dllexport) ignore2() { return; };
+extern "C" void __declspec(dllexport) Ext_SetAllPedRemaps(CPed * ped, int num)
+{
+	for (int i = 0; i < TEXTURE_LIMIT; ++i)
+	{
+		PedExtended& info = extData.Get(ped);
+		info.curRemapNum[i] = num;
+	}
+	if (useLog) lg << "Remaps: New all remaps num: " << num << " for ped " << (int)ped << endl;
+}
