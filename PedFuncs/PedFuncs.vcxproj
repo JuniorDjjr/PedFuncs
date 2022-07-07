@@ -96,13 +96,13 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='GTASA Release|Win32'">
-    <OutDir>G:\GTA San Andreas Remaster\modloader\PedFuncs\</OutDir>
+    <OutDir>G:\GTA SA The Modded Edition\modloader\PedFuncs\</OutDir>
     <IntDir>$(ProjectDir).obj\GTASA\Release\</IntDir>
     <TargetName>PedFuncs</TargetName>
     <TargetExt>.asi</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='GTASA zDebug|Win32'">
-    <OutDir>G:\GTA San Andreas Remaster\modloader\PedFuncs\</OutDir>
+    <OutDir>G:\GTA SA The Modded Edition\modloader\PedFuncs\</OutDir>
     <IntDir>$(ProjectDir).obj\GTASA\Debug\</IntDir>
     <TargetName>PedFuncs_d</TargetName>
     <TargetExt>.asi</TargetExt>

@@ -9,13 +9,29 @@
 #include "CTxdStore.h"
 #include "CCutsceneMgr.h"
 #include "CTimer.h"
+#include "CStreaming.h"
+#include "CKeyGen.h"
 #include <time.h>
 #include "IniReader\IniReader.h"
+#include "..\injector\assembly.hpp"
 
 using namespace plugin;
 using namespace std;
+using namespace injector;
 
 const int TEXTURE_LIMIT = 8;
+
+fstream lg;
+bool useLog = false;
+bool alreadyLoaded = false;
+unsigned int cutsceneRunLastTime = 0;
+uintptr_t ORIGINAL_AssignRemapTxd = 0;
+uintptr_t ORIGINAL_RwTexDictionaryFindNamedTexture = 0;
+
+int gangHandsTxdIndex = 0;
+RwTexDictionary* handsDict;
+RwTexture* handsBlack;
+RwTexture* handsWhite;
 
 void FindRemaps(CPed* ped);
 
@@ -56,12 +72,105 @@ public:
 	}
 };
 
-fstream lg;
-bool useLog = false;
-const int totalOfDontRepeatIt = 30;
-unsigned int cutsceneRunLastTime = 0;
+RwTexDictionary* pedstxdArray[4];
+int pedstxdIndexArray[4];
+bool anyAdditionalPedsTxd;
 
-DontRepeatIt *dontRepeatIt[totalOfDontRepeatIt];
+void CustomAssignRemapTxd(const char* txdName, uint16_t txdId)
+{
+	if (txdName) {
+
+		size_t len = strlen(txdName);
+
+		if (len > 1) {
+			//if (useLog) lg << "trying txd " << txdName << ".txd\n";
+			if (isdigit(txdName[len - 1]))
+			{
+				if (strncmp(txdName, "peds", 3) == 0)
+				{
+					int arrayIndex = txdName[len - 1] - '0' - 1;
+					if (arrayIndex < 4) {
+						pedstxdIndexArray[arrayIndex] = txdId;
+						CTxdStore::AddRef(pedstxdIndexArray[arrayIndex]);
+						anyAdditionalPedsTxd = true;
+						if (useLog) lg << "Found additional peds" << arrayIndex + 1 << ".txd\n";
+					}
+					else {
+						if (useLog) lg << "ERROR: peds*.txd limit is only up to 'peds5.txd' \n";
+						if (useLog) lg.flush();
+					}
+				}
+				if (gangHandsTxdIndex == 0 && strncmp(txdName, "ganghands", 9) == 0)
+				{
+					gangHandsTxdIndex = txdId;
+					CTxdStore::AddRef(txdId);
+				}
+			}
+		}
+	}
+	plugin::CallDynGlobal< const char*, uint16_t>(ORIGINAL_AssignRemapTxd, txdName, txdId);
+}
+
+void LoadAdditionalTxds()
+{
+	bool anyRequest = false;
+
+	if (gangHandsTxdIndex) {
+		CStreaming::RequestTxdModel(gangHandsTxdIndex, (eStreamingFlags::GAME_REQUIRED | eStreamingFlags::KEEP_IN_MEMORY));
+		handsDict = ((RwTexDictionary * (__cdecl*)(int)) 0x408340)(gangHandsTxdIndex); //size_t __cdecl getTexDictionary(int txdIndex)
+		anyRequest = true;
+	}
+
+	if (anyAdditionalPedsTxd) {
+		for (int i = 0; i < 4; ++i)
+		{
+			if (pedstxdIndexArray[i]) {
+				CStreaming::RequestTxdModel(pedstxdIndexArray[i], (eStreamingFlags::GAME_REQUIRED | eStreamingFlags::KEEP_IN_MEMORY));
+				//CStreaming::RequestTxdModel(pedstxdIndexArray[i], 8);
+			}
+		}
+
+		CStreaming::LoadAllRequestedModels(false);
+		anyRequest = false;
+
+		for (int i = 0; i < 4; ++i)
+		{
+			if (pedstxdIndexArray[i]) {
+				pedstxdArray[i] = ((RwTexDictionary * (__cdecl*)(int)) 0x408340)(pedstxdIndexArray[i]); //size_t __cdecl getTexDictionary(int txdIndex)
+			}
+		}
+	}
+
+	if (anyRequest) {
+		CStreaming::LoadAllRequestedModels(false);
+	}
+}
+
+RwTexture* __cdecl Custom_RwTexDictionaryFindNamedTexture(RwTexDictionary* dict, const char* name)
+{
+	RwTexture* texture;
+
+	texture = plugin::CallAndReturnDynGlobal<RwTexture*, RwTexDictionary*, const char*>(ORIGINAL_RwTexDictionaryFindNamedTexture, dict, name);
+	//texture = RwTexDictionaryFindNamedTexture(dict, name);
+	if (texture) return texture;
+
+	if (anyAdditionalPedsTxd)
+	{
+		for (int i = 0; i < 4; ++i)
+		{
+			if (pedstxdArray[i])
+			{
+				texture = RwTexDictionaryFindNamedTexture(pedstxdArray[i], name);
+				if (texture) return texture;
+			}
+		}
+	}
+	//if (useLog) lg << name << " texture not found \n";
+	return nullptr;
+}
+
+const int totalOfDontRepeatIt = 30;
+DontRepeatIt* dontRepeatIt[totalOfDontRepeatIt];
 int curDontRepeatItIndex;
 
 class PedFuncs
@@ -90,13 +199,65 @@ public:
 		if (useLog)
 		{
 			lg.open("PedFuncs.log", std::fstream::out | std::fstream::trunc);
-			lg << "v0.4" << endl;
+			lg << "v0.5" << endl;
 			if (ini.data.size() == 0)
 			{
 				lg << "Warning: Can't read ini file." << endl;
 			}
 		}
 
+		Events::initRwEvent += []
+		{
+			memset(pedstxdArray, 0, sizeof(pedstxdArray));
+			memset(pedstxdIndexArray, 0, sizeof(pedstxdIndexArray));
+
+			ORIGINAL_AssignRemapTxd = ReadMemory<uintptr_t>(0x5B62C2 + 1, true);
+			ORIGINAL_AssignRemapTxd += (GetGlobalAddress(0x5B62C2) + 5);
+
+			patch::RedirectCall(0x5B62C2, CustomAssignRemapTxd, true);
+
+			ORIGINAL_RwTexDictionaryFindNamedTexture = ReadMemory<uintptr_t>(0x4C7533 + 1, true);
+			ORIGINAL_RwTexDictionaryFindNamedTexture += (GetGlobalAddress(0x4C7533) + 5);
+
+			patch::RedirectCall(0x4C7533, Custom_RwTexDictionaryFindNamedTexture, true);
+			patch::RedirectCall(0x731733, Custom_RwTexDictionaryFindNamedTexture, true); // for map etc
+		};
+
+		Events::initGameEvent += []
+		{
+			if (!alreadyLoaded) {
+				alreadyLoaded = true;
+
+				LoadAdditionalTxds();
+
+				if (handsDict)
+				{
+					handsBlack = RwTexDictionaryFindHashNamedTexture(handsDict, CKeyGen::GetUppercaseKey("hands_black"));
+					handsWhite = RwTexDictionaryFindHashNamedTexture(handsDict, CKeyGen::GetUppercaseKey("hands_white"));
+
+					if (handsBlack && handsWhite)
+					{
+						injector::MakeInline<0x59EF79, 0x59EF82>([](injector::reg_pack& regs)
+						{
+							CPed* ped = *(CPed**)(regs.esp + 0x1C + 0x8);
+							CPedModelInfo* pedModelInfo = (CPedModelInfo*)CModelInfo::GetModelInfo(ped->m_nModelIndex);
+
+							if (pedModelInfo->m_nPedType == ePedType::PED_TYPE_GANG1 || pedModelInfo->m_nPedType == ePedType::PED_TYPE_GANG2)
+							{
+								// normally black people
+								regs.eax = (uint32_t)handsBlack;
+							}
+							else
+							{
+								//normally white people
+								regs.eax = (uint32_t)handsWhite;
+							}
+						});
+					}
+				}
+
+			}
+		};
 
 		Events::processScriptsEvent += []
 		{
