@@ -23,6 +23,7 @@ const int TEXTURE_LIMIT = 8;
 
 fstream lg;
 bool useLog = false;
+bool txdsNotLoadedYet = true;
 bool alreadyLoaded = false;
 unsigned int cutsceneRunLastTime = 0;
 uintptr_t ORIGINAL_AssignRemapTxd = 0;
@@ -113,6 +114,7 @@ void CustomAssignRemapTxd(const char* txdName, uint16_t txdId)
 
 void LoadAdditionalTxds()
 {
+	txdsNotLoadedYet = false;
 	bool anyRequest = false;
 
 	if (gangHandsTxdIndex) {
@@ -127,6 +129,7 @@ void LoadAdditionalTxds()
 			if (pedstxdIndexArray[i]) {
 				CStreaming::RequestTxdModel(pedstxdIndexArray[i], (eStreamingFlags::GAME_REQUIRED | eStreamingFlags::KEEP_IN_MEMORY));
 				//CStreaming::RequestTxdModel(pedstxdIndexArray[i], 8);
+				if (useLog) lg << "Loading additional txd id " << (int)pedstxdIndexArray[i] << endl;
 			}
 		}
 
@@ -166,6 +169,7 @@ RwTexture* __cdecl Custom_RwTexDictionaryFindNamedTexture(RwTexDictionary* dict,
 		}
 	}
 	//if (useLog) lg << name << " texture not found \n";
+	if (txdsNotLoadedYet && anyAdditionalPedsTxd) LoadAdditionalTxds(); // looks not really safe, but tested a lot, if some problem by using more than 1 peds*.txd, do something here
 	return nullptr;
 }
 
@@ -199,7 +203,7 @@ public:
 		if (useLog)
 		{
 			lg.open("PedFuncs.log", std::fstream::out | std::fstream::trunc);
-			lg << "v0.5" << endl;
+			lg << "v0.5.1" << endl;
 			if (ini.data.size() == 0)
 			{
 				lg << "Warning: Can't read ini file." << endl;
@@ -228,7 +232,7 @@ public:
 			if (!alreadyLoaded) {
 				alreadyLoaded = true;
 
-				LoadAdditionalTxds();
+				if (txdsNotLoadedYet) LoadAdditionalTxds();
 
 				if (handsDict)
 				{
